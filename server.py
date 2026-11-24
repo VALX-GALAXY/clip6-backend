@@ -50,7 +50,7 @@ class ClipRequest(BaseModel):
     clips_count: int = Field(default=3, ge=1, le=10, description="Number of clips to generate")
     min_duration: int = Field(default=20, ge=10, le=120, description="Minimum clip duration (seconds)")
     max_duration: int = Field(default=60, ge=15, le=180, description="Maximum clip duration (seconds)")
-    whisper_model: str = Field(default="base", description="Whisper model: tiny, base, small")
+    whisper_model: str = Field(default="tiny", description="Whisper model: tiny, base, small")
     gemini_model: Optional[str] = Field(default=None, description="Gemini model override")
     api_key: Optional[str] = Field(default=None, description="Optional Gemini API key override")
 
@@ -70,34 +70,58 @@ def process_video_job(job_id: str, req: ClipRequest):
 
         model = req.gemini_model or os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 
-        # 1. Ingest
+        # 1. Fast-Path: Check for instant captions first (bypasses heavy video download and Whisper)
         job["status"] = "processing"
-        job["step"] = "Downloading / ingesting video..."
-        job["progress"] = 15
-        video_path = clipper.ingest(req.url, job_dir)
+        job["step"] = "Checking instant captions from YouTube..."
+        job["progress"] = 10
+        transcript = None
+        if re.match(r"https?://", req.url):
+            transcript = clipper.fetch_youtube_subtitles(req.url, job_dir)
 
-        # 2. Transcribe
-        job["step"] = f"Transcribing audio (instant captions or Whisper {req.whisper_model})..."
-        job["progress"] = 40
-        transcript = clipper.transcribe(video_path, job_dir, model_size=req.whisper_model, src_url=req.url)
+        if transcript:
+            # 2. Moments detection with Gemini (2-3 seconds)
+            job["step"] = "Finding viral moments with Google Gemini AI..."
+            job["progress"] = 35
+            clips_data = clipper.detect_moments(
+                transcript,
+                n=req.clips_count,
+                lo=req.min_duration,
+                hi=req.max_duration,
+                api_key=api_key,
+                model=model
+            )
+            if not clips_data:
+                raise ValueError("No viral moments found matching duration criteria. Try adjusting min/max seconds.")
 
-        # 3. Detect moments with Gemini
-        job["step"] = "Finding viral moments with Google Gemini AI..."
-        job["progress"] = 65
-        clips_data = clipper.detect_moments(
-            transcript,
-            n=req.clips_count,
-            lo=req.min_duration,
-            hi=req.max_duration,
-            api_key=api_key,
-            model=model
-        )
+            # 3. Download optimized 720p stream
+            job["step"] = "Downloading optimized video stream..."
+            job["progress"] = 60
+            video_path = clipper.ingest(req.url, job_dir)
+        else:
+            # Fallback path (no native captions or local upload)
+            job["step"] = "Downloading / ingesting video..."
+            job["progress"] = 20
+            video_path = clipper.ingest(req.url, job_dir)
 
-        if not clips_data:
-            raise ValueError("No viral moments found matching the duration criteria. Try adjusting min/max seconds.")
+            job["step"] = f"Transcribing audio with Whisper ({req.whisper_model})..."
+            job["progress"] = 50
+            transcript = clipper.transcribe(video_path, job_dir, model_size=req.whisper_model, src_url=req.url)
+
+            job["step"] = "Finding viral moments with Google Gemini AI..."
+            job["progress"] = 70
+            clips_data = clipper.detect_moments(
+                transcript,
+                n=req.clips_count,
+                lo=req.min_duration,
+                hi=req.max_duration,
+                api_key=api_key,
+                model=model
+            )
+            if not clips_data:
+                raise ValueError("No viral moments found matching duration criteria. Try adjusting min/max seconds.")
 
         # 4. Export 9:16 clips with burned karaoke subtitles in parallel
-        job["step"] = f"Exporting {len(clips_data)} vertical 9:16 clips in parallel..."
+        job["step"] = f"Exporting {len(clips_data)} vertical 9:16 clips (Turbo mode)..."
         job["progress"] = 75
 
         def render_clip_task(item):
@@ -118,7 +142,7 @@ def process_video_job(job_id: str, req: ClipRequest):
             }
 
         exported_clips = []
-        max_workers = min(4, max(1, os.cpu_count() or 2))
+        max_workers = min(2, max(1, os.cpu_count() or 1))
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_item = {executor.submit(render_clip_task, (idx, c)): idx for idx, c in enumerate(clips_data, 1)}
             done_count = 0

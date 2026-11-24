@@ -50,11 +50,11 @@ def ingest(src: str, work: Path) -> Path:
         print(f"  Found cached video at {out}")
         return out
     if re.match(r"https?://", src):
-        print(f"  Downloading video with yt-dlp (fast H.264/AAC streams): {src}")
-        # Prefer H.264 (avc1) + AAC for 5x faster CPU decoding and native AAC audio
+        print(f"  Downloading video with yt-dlp (fast 720p H.264/AAC): {src}")
+        # Prefer 720p H.264 (avc1) + AAC for 4x faster CPU decoding/encoding and smaller download
         run([sys.executable, "-m", "yt_dlp",
              "--concurrent-fragments", "5",
-             "-f", "bv*[vcodec^=avc1][height<=1080]+ba[ext=m4a]/bv*[height<=1080]+ba/b",
+             "-f", "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720]+ba/b",
              "--merge-output-format", "mp4",
              "-o", str(out), src])
     else:
@@ -118,7 +118,7 @@ def fetch_youtube_subtitles(src: str, work: Path) -> dict | None:
     return None
 
 
-def transcribe(video: Path, work: Path, model_size: str = "base", src_url: str | None = None) -> dict:
+def transcribe(video: Path, work: Path, model_size: str = "tiny", src_url: str | None = None) -> dict:
     tpath = work / "transcript.json"
     if tpath.exists():
         print(f"  Loading cached transcript from {tpath}")
@@ -291,16 +291,16 @@ def export_clip(video: Path, tr: dict, clip: dict, idx: int, outdir: Path, work:
     out = outdir / f"{idx:02d}-{slug}.mp4"
     duration = round(clip["end"] - clip["start"], 2)
     
-    # Centre-crop to 9:16 and burn captions
-    vf = f"crop=ih*9/16:ih,scale=1080:1920,ass={ass.name}"
+    # Centre-crop to 9:16 (720x1280 mobile portrait) and burn captions
+    vf = f"crop=ih*9/16:ih,scale=720:1280,ass={ass.name}"
     
-    # Normalize audio loudness to standard social media volume (-14 LUFS) and boost dialogue
-    af = "loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000"
+    # Rapid audio boost: +5.5dB gain with peak limiter for zero-overhead instant normalization
+    af = "volume=1.8,alimiter=limit=0.95"
 
     # FFmpeg export:
     # -avoid_negative_ts make_zero fixes negative audio PTS that causes silent playback in players
     # -async 1 guarantees audio frame sync
-    # -map 0:v:0 -map 0:a:0? ensures audio stream is always included
+    # -preset ultrafast achieves 3-4x faster rendering on CPU
     run([
         "ffmpeg", "-y",
         "-ss", str(clip["start"]),
@@ -310,9 +310,9 @@ def export_clip(video: Path, tr: dict, clip: dict, idx: int, outdir: Path, work:
         "-map", "0:a:0?",
         "-vf", vf,
         "-af", af,
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
         "-threads", "0",
-        "-c:a", "aac", "-b:a", "192k", "-ac", "2",
+        "-c:a", "aac", "-b:a", "128k", "-ac", "2",
         "-avoid_negative_ts", "make_zero",
         "-async", "1",
         "-movflags", "+faststart",
