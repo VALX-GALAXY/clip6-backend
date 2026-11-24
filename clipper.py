@@ -66,12 +66,71 @@ def ingest(src: str, work: Path) -> Path:
 
 
 # ------------------------------------------------------------ 2. transcribe
-def transcribe(video: Path, work: Path, model_size: str = "base") -> dict:
+def fetch_youtube_subtitles(src: str, work: Path) -> dict | None:
+    """Attempts to fetch pre-existing YouTube captions in seconds, bypassing Whisper."""
+    if not re.match(r"https?://", src):
+        return None
+    try:
+        print("  Checking for instant YouTube captions...")
+        cmd = [
+            sys.executable, "-m", "yt_dlp",
+            "--write-auto-sub", "--write-sub",
+            "--sub-lang", "en.*,en",
+            "--sub-format", "json3",
+            "--skip-download",
+            "-o", str(work / "subtitles.%(ext)s"),
+            src
+        ]
+        subprocess.run(cmd, cwd=work, capture_output=True, text=True, timeout=25)
+        json3_files = list(work.glob("subtitles*.json3"))
+        if json3_files:
+            raw = json.loads(json3_files[0].read_text(encoding="utf-8"))
+            segments = []
+            for ev in raw.get("events", []):
+                if "segs" not in ev:
+                    continue
+                start_sec = ev.get("tStartMs", 0) / 1000.0
+                dur_sec = ev.get("dDurationMs", 0) / 1000.0
+                end_sec = start_sec + dur_sec
+                words = []
+                text_parts = []
+                for s in ev["segs"]:
+                    w = s.get("utf8", "").strip()
+                    if not w:
+                        continue
+                    text_parts.append(w)
+                    w_start = start_sec + (s.get("tOffsetMs", 0) / 1000.0)
+                    words.append({"w": w, "start": round(w_start, 2), "end": round(w_start + 0.35, 2)})
+                if text_parts:
+                    segments.append({
+                        "start": round(start_sec, 2),
+                        "end": round(end_sec, 2),
+                        "text": " ".join(text_parts),
+                        "words": words
+                    })
+            if segments:
+                data = {"language": "en", "segments": segments}
+                (work / "transcript.json").write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+                print("  ⚡ Instant transcript loaded from YouTube in 1 second! (Whisper bypassed)")
+                return data
+    except Exception as e:
+        print(f"  Note: Native captions check skipped ({e}), using local Whisper...")
+    return None
+
+
+def transcribe(video: Path, work: Path, model_size: str = "base", src_url: str | None = None) -> dict:
     tpath = work / "transcript.json"
     if tpath.exists():
         print(f"  Loading cached transcript from {tpath}")
         return json.loads(tpath.read_text(encoding="utf-8"))
     
+    # 1. Fast-path: Check for instant YouTube captions
+    if src_url:
+        yt_subs = fetch_youtube_subtitles(src_url, work)
+        if yt_subs:
+            return yt_subs
+    
+    # 2. Fallback: Local faster-whisper
     from faster_whisper import WhisperModel  # lazy: heavy import
     wav = work / "audio.wav"
     print("  Extracting audio for local Whisper...")
@@ -297,8 +356,8 @@ def main():
 
     print("\n1/4 Ingesting video...")
     video = ingest(a.source, work)
-    print("2/4 Transcribing audio with local Whisper...")
-    tr = transcribe(video, work, a.whisper)
+    print("2/4 Transcribing audio (instant captions or Whisper)...")
+    tr = transcribe(video, work, a.whisper, src_url=a.source)
     print("3/4 Finding viral moments with Google Gemini AI...")
     cpath = work / "clips.json"
     clips = json.loads(cpath.read_text(encoding="utf-8")) if cpath.exists() else detect_moments(tr, a.clips, a.lo, a.hi, api_key, a.model)

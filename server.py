@@ -77,9 +77,9 @@ def process_video_job(job_id: str, req: ClipRequest):
         video_path = clipper.ingest(req.url, job_dir)
 
         # 2. Transcribe
-        job["step"] = f"Transcribing audio with Whisper ({req.whisper_model})..."
+        job["step"] = f"Transcribing audio (instant captions or Whisper {req.whisper_model})..."
         job["progress"] = 40
-        transcript = clipper.transcribe(video_path, job_dir, model_size=req.whisper_model)
+        transcript = clipper.transcribe(video_path, job_dir, model_size=req.whisper_model, src_url=req.url)
 
         # 3. Detect moments with Gemini
         job["step"] = "Finding viral moments with Google Gemini AI..."
