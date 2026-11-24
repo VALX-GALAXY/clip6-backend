@@ -23,9 +23,9 @@ import clipper
 load_dotenv()
 
 app = FastAPI(
-    title="Clipper AI API",
-    description="Turn long videos into viral 9:16 vertical clips with Gemini AI & Whisper",
-    version="1.0.0"
+    title="VA Clipper AI API",
+    description="VA Clipper AI: Turn long videos into viral 9:16 vertical clips",
+    version="2.0.0"
 )
 
 # Enable CORS for Netlify and localhost

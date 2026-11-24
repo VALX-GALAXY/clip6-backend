@@ -1,6 +1,6 @@
-# 🎬 Clipper (Free & Low-Cost AI Short-Form Video Generator)
+# 🎬 VA Clipper AI - Viral 9:16 Shorts & Reels Studio
 
-Turn long videos into viral, captioned 9:16 vertical clips (TikTok, Shorts, Reels) using **100% free / open-source resources**.
+Turn long videos into viral, captioned 9:16 vertical clips (TikTok, Shorts, Reels) using **high-speed AI automation**.
 
 ---
 
