@@ -1,0 +1,21 @@
+# Virtual environment
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+
+# Secrets & API Keys
+.env
+
+# Working directories & generated video data
+data/
+project/
+*.ass
+*.wav
+*.mp4
+
+# Operating System files
+.DS_Store
+Thumbs.db
+

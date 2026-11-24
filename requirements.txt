@@ -1,0 +1,7 @@
+yt-dlp
+faster-whisper
+google-genai
+python-dotenv
+fastapi
+uvicorn
+python-multipart
